@@ -1,0 +1,223 @@
+\# Goal: To find taxa for the unclassified sequences with length >300 bp
+
+\# Note: All the required files are saved in the working directory for convenience
+
+\# ------------------------------
+
+\# Step 1: Load Required Libraries
+
+\# ------------------------------
+
+\# Load essential R packages for data handling, sequence processing, and phylogenetic tree generation.
+
+library(tidyverse)    # For Data manipulation
+
+library(Biostrings)   # For DNA sequence handling
+
+library(DECIPHER)     # For Multiple sequence alignment
+
+library(ape)          # For Phylogenetic tree construction
+
+library(phangorn)     # For Tree analysis
+
+\# ------------------------------
+
+\# Step 2: Load Kraken2 Data
+
+\# ------------------------------
+
+\# Read the Kraken2 classification results file
+
+kraken\_data <- read\_tsv("barcode01.kraken2.assignments.tsv", col\_names = FALSE)
+
+\# Assign meaningful column names for clarity
+
+colnames(kraken\_data) <- c("Status", "Sequence\_ID", "Taxonomy\_ID", "Length", "KMer\_LCA")
+
+\# Display first few rows
+
+head(kraken\_data)
+
+\# ------------------------------
+
+\# Step 3: Filter Unclassified Sequences (with length >300 bp)
+
+\# ------------------------------
+
+\# Extract sequences labeled as "U" and longer than 300 bp
+
+unclassified\_seq <- kraken\_data %>%
+
+  filter(Status == "U" & Length > 300)
+
+\# Check how many unclassified sequences match the condition
+
+nrow(unclassified\_seq)
+
+head(unclassified\_seq)
+
+\# ------------------------------
+
+\# Step 4: Extract the respective Sequences from FASTA File
+
+\# ------------------------------
+
+\# Read the FASTA file containing all sequences
+
+fasta\_file <- readDNAStringSet("barcode01\_merged.fasta")
+
+\# Ensure Sequence\_IDs match between Kraken2 output file and FASTA file
+
+\# Removing Extra information from FASTA headers
+
+\# Remove extra text after the first space in fasta\_file
+
+clean\_fasta\_file <- gsub(" .\*", "", names(fasta\_file))
+
+head(clean\_fasta\_file)
+
+\# Extract sequences that match unclassified Sequence\_IDs
+
+unclassified\_fasta <- fasta\_file\[clean\_fasta\_file %in% unclassified\_seq$Sequence\_ID\]
+
+\# Save extracted unclassified sequences into a new FASTA file
+
+writeXStringSet(unclassified\_fasta, "unclassified\_sequences.fasta")
+
+\# ------------------------------
+
+\# Step 5: Perform BLAST Search
+
+\# ------------------------------
+
+\# Run BLASTn manually by uploading the "unclassified\_sequences.fasta" file
+
+\# BLASTn Result:
+
+\# All sequences show ~95 percent identity with "Enterococcus faecalis"
+
+\# Generating a phylogenetic tree to place the sequences in relation to known species, helping confirm their true belonging to E.faecalis or a different species
+
+\# ------------------------------
+
+\# Step 6: Phylogenetic Analysis to Confirm Taxonomy
+
+\# ------------------------------
+
+\# Using Neighbor-Joining (NJ) since the sequences are closely related
+
+\# Load unclassified sequences again for phylogenetic analysis
+
+unclassified\_fasta\_saved <- readDNAStringSet("unclassified\_sequences.fasta")
+
+\# Perform multiple sequence alignment (MSA)
+
+alignment <- AlignSeqs(unclassified\_fasta\_saved)
+
+\# Convert aligned sequences to phylogenetic format
+
+dna\_bin <- as.DNAbin(alignment)
+
+\# Compute genetic distances
+
+dna\_dist <- dist.dna(dna\_bin)
+
+\# Build a phylogenetic tree using the Neighbor-Joining (NJ) method
+
+nj\_tree <- nj(dna\_dist)
+
+\# Plot the tree
+
+pdf("Unclassified\_sequences\_nj\_tree.pdf", width = 16, height = 7)
+
+plot(nj\_tree, main = "Phylogenetic Tree of Unclassified Sequences", cex = 0.7)
+
+dev.off()
+
+\# ------------------------------
+
+\# Step 7: Compare Unclassified Sequences to Known Reference Sequences
+
+\# (Here, only one Reference Sequence i.e NZ OVVR01000001.1 Enterococcus faecalis isolate Efs173 NODE 1 length 1018502 cov 29.8739, whole genome shotgun sequence is used due to memory constraints)
+
+\# ------------------------------
+
+\# Load reference sequences
+
+ref\_seq <- readDNAStringSet("E.faecalis\_Ref\_seq.fasta")
+
+\# Combine reference sequences with unclassified sequences
+
+all\_seq <- c(unclassified\_fasta\_saved, ref\_seq)
+
+\# Perform multiple sequence alignment (MSA) on all sequences
+
+alignment\_all <- AlignSeqs(all\_seq)
+
+\# Convert alignment to phylogenetic format
+
+dna\_bin\_all <- as.DNAbin(alignment\_all)
+
+\# Compute genetic distances
+
+dna\_dist\_all <- dist.dna(dna\_bin\_all)
+
+\# Handle missing values in the distance matrix (if any)
+
+if (sum(is.na(dna\_dist\_all)) > 0) {
+
+  cat("Warning: Distance matrix contains missing values. Removing problematic sequences...\\n")
+
+  dna\_dist\_all\_clean <- na.omit(as.matrix(dna\_dist\_all))
+
+  dna\_dist\_all <- as.dist(dna\_dist\_all\_clean)
+
+}
+
+\# ------------------------------
+
+\# Step 8: Construct Parsimony Tree
+
+\# ------------------------------
+
+\# Using Parsimony for ref. seq. + unclassified sequences bacause of high diversity and unreliable distance calculations
+
+parsimony\_tree <- pratchet(as.phyDat(dna\_bin\_all))
+
+\# Save phylogenetic tree as a PDF file
+
+pdf("parsimony\_tree.pdf", width = 16, height = 7)
+
+plot(parsimony\_tree, main = "Parsimony Phylogenetic Tree", cex = 0.7)
+
+dev.off()
+
+\# Interpretation:
+
+\# Strong BLAST hits (~95% identity) shows a close relationship to E.faecalis however, its not a ceertainty.
+
+\# The unclassified sequences might belong to a related clade as NJ analysis showed high similarity.
+
+\# The unclassified sequences are genetically close but aren't identical to E.faecalis.
+
+\# This could indicate a possible novel taxa or variation in strain.
+
+\# ------------------------------
+
+\# Summary of Findings
+
+\# ------------------------------
+
+cat("\\nSummary of Findings:\\n")
+
+cat("- Extracted unclassified sequences (>300 bp) from Kraken2 output.\\n")
+
+cat("- Performed BLASTn search to find taxonomic matches.\\n")
+
+cat("- Constructed phylogenetic trees to confirm species identity.\\n")
+
+cat("- Unclassified sequences show high similarity (~95%) to Enterococcus faecalis.\\n")
+
+cat("- Phylogenetic analysis supports classification as E. faecalis.\\n")
+
+cat("\\nResults saved in 'Unclassified\_sequences\_nj\_tree.pdf' and 'parsimony\_tree.pdf' (phylogenetic tree).\\n")
